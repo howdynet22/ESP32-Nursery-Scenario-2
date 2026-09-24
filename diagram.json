@@ -66,6 +66,26 @@
       }
     },
     {
+      "type": "wokwi-pushbutton",
+      "id": "ventButton",
+      "top": 450,
+      "left": -50,
+      "attrs": {
+        "color": "blue",
+        "label": "VENT: 0/45/90"
+      }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "lightButton",
+      "top": 450,
+      "left": 75,
+      "attrs": {
+        "color": "yellow",
+        "label": "LIGHTS: ON/OFF"
+      }
+    },
+    {
       "type": "wokwi-led",
       "id": "grow1",
       "top": 301,
@@ -220,6 +240,10 @@
         "v153.6"
       ]
     ],
+    ["esp:D32", "ventButton:1.l", "blue", []],
+    ["esp:GND.1", "ventButton:2.l", "black", []],
+    ["esp:D33", "lightButton:1.l", "blue", []],
+    ["esp:GND.1", "lightButton:2.l", "black", []],
     [
       "esp:D18",
       "r1:1",

@@ -29,7 +29,7 @@ The submitted report contains the full source in its appendix and must include t
 | Mode | Entry | Vent | Two indicator LEDs |
 | --- | --- | --- | --- |
 | Auto | Healthy sensors, Manual switch off | Opens farther as indoor temperature rises; closed when cold | On in darkness, off again after light rises |
-| Manual Override | Healthy sensors, Manual switch on | Held fully open at 90° | Off; automatic light and vent decisions paused |
+| Manual Override | Healthy sensors, Manual switch on | Vent button cycles 0°, 45°, 90° | Light button toggles both LEDs; automatic decisions paused |
 | Sensor Fault | Invalid DHT22 or LDR reading, from either mode | Held at 45° | On; OLED names the failed sensor |
 
 A fault takes priority over Manual, which takes priority over Auto. A fault remains active until **both sensors have read normally for six continuous seconds** and the worker presses the reset button (or enters `reset` in the serial monitor). A reset attempted too early is ignored. The fallback position is a design choice for this model, not a guaranteed crop-safe position for every nursery.
@@ -42,7 +42,7 @@ Auto starts opening the vent at 29 °C and closes it after the room cools below 
 2. Replace its `sketch.ino` and `diagram.json` with the files in this repository. Add `libraries.txt` with the four listed libraries, or install them through Library Manager.
 3. Start the simulation. Wait about two seconds for the first DHT22 reading. Open the serial monitor at **115200 baud**.
 4. Change the DHT22 temperature and the photoresistor's `lux` control. Watch the OLED, vent angle, and two LEDs. The OLED displays a **relative brightness percentage**, not lux.
-5. Move the slide switch right for Manual Override and left for Auto. Use the red pushbutton to reset a repaired fault.
+5. Move the slide switch right for Manual Override and left for Auto. In Manual, press the blue vent button to cycle 0° → 45° → 90° → 0°, and press the yellow light button to toggle both LEDs. Entering Manual starts at 0° with lights off. Use the red pushbutton to reset a repaired fault.
 6. Save the project while signed in to Wokwi and paste the resulting share URL into the report. This repository does not by itself create that URL.
 
 ## Physical wiring
@@ -56,6 +56,8 @@ Auto starts opening the vent at 29 °C and closes it after the room cools below 
 | Two LEDs | GPIO18 and GPIO19 | One 220 Ω series resistor per LED; cathodes to ground |
 | Manual slide switch | Common to GPIO27, right contact to ground | Left contact unused; built-in pull-up holds Auto when open |
 | Fault reset button | GPIO26 to ground when pressed | Normally open; built-in pull-up |
+| Manual vent button | GPIO32 to ground when pressed | Normally open; cycles vent position only in Manual |
+| Manual light button | GPIO33 to ground when pressed | Normally open; toggles both LEDs only in Manual |
 
 Check the labels on your particular ESP32 board before wiring. Power down before changing connections. Limit the real vent linkage so the servo cannot push beyond its mechanical stops. Do not connect a real grow lamp directly to an ESP32 GPIO pin; use a correctly rated driver. The LEDs in this circuit demonstrate the control signal only.
 

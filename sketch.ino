@@ -21,6 +21,8 @@ constexpr uint8_t LED_1_PIN = 18;
 constexpr uint8_t LED_2_PIN = 19;
 constexpr uint8_t MANUAL_PIN = 27;    // Switch shorts to ground in manual mode
 constexpr uint8_t RESET_PIN = 26;     // Normally open, shorts to ground
+constexpr uint8_t VENT_BUTTON_PIN = 32;
+constexpr uint8_t LIGHT_BUTTON_PIN = 33;
 constexpr uint32_t DHT_PERIOD = 2000;
 constexpr uint32_t LIGHT_PERIOD = 250;
 constexpr uint32_t DISPLAY_PERIOD = 250;
@@ -48,6 +50,14 @@ bool wasHealthy = false;
 bool manualStable = false, manualCandidate = false;
 uint32_t manualChanged = 0;
 bool resetWasPressed = false;
+int manualVentDegrees = 0;
+bool manualLights = false;
+struct ButtonState {
+  bool candidate = false;
+  bool stable = false;
+  uint32_t changed = 0;
+};
+ButtonState ventButton, lightButton;
 char command[64];
 size_t commandLength = 0;
 
@@ -97,16 +107,45 @@ void sampleDht() {
   }
 }
 
-/** @brief Filter contact bounce on the manual switch and read reset button.
+/** @brief Debounce an active-low pushbutton and report a new press.
+ * @param pin GPIO connected to the button.
+ * @param state Persistent debounce state.
+ * @param now Current milliseconds.
+ * @return True once for each stable press. */
+bool buttonPressed(uint8_t pin, ButtonState &state, uint32_t now) {
+  bool candidate = digitalRead(pin) == LOW;
+  if (candidate != state.candidate) {
+    state.candidate = candidate;
+    state.changed = now;
+  }
+  if (candidate != state.stable && now - state.changed >= 40) {
+    state.stable = candidate;
+    return candidate;
+  }
+  return false;
+}
+
+/** @brief Filter contact bounce and read the manual controls.
  * @param now Current milliseconds.
  * @return True only on a new reset-button press. */
 bool readControls(uint32_t now) {
+  bool wasManual = manualStable;
   bool candidate = digitalRead(MANUAL_PIN) == LOW;
   if (candidate != manualCandidate) {
     manualCandidate = candidate;
     manualChanged = now;
   }
   if (now - manualChanged >= 40) manualStable = manualCandidate;
+  if (manualStable && !wasManual) {
+    manualVentDegrees = 0;
+    manualLights = false;
+  }
+  bool ventEdge = buttonPressed(VENT_BUTTON_PIN, ventButton, now);
+  bool lightEdge = buttonPressed(LIGHT_BUTTON_PIN, lightButton, now);
+  if (manualStable && mode != Mode::FAULT) {
+    if (ventEdge) manualVentDegrees = (manualVentDegrees + 45) % 135;
+    if (lightEdge) manualLights = !manualLights;
+  }
   bool pressed = digitalRead(RESET_PIN) == LOW;
   bool edge = pressed && !resetWasPressed;
   resetWasPressed = pressed;
@@ -143,8 +182,8 @@ void calculateOutputs() {
     return;
   }
   if (mode == Mode::MANUAL) {
-    ventDegrees = VENT_MAX_DEG;
-    growLights = false;
+    ventDegrees = manualVentDegrees;
+    growLights = manualLights;
     return;
   }
   if (!haveDhtSample || !ldrValid) {
@@ -218,7 +257,7 @@ void renderDisplay() {
     if (!dhtValid) oled.print("DHT22 ");
     if (!ldrValid) oled.print("LDR ");
     oled.print("RESET");
-  } else if (mode == Mode::MANUAL) oled.print("AUTO CONTROL PAUSED");
+  } else if (mode == Mode::MANUAL) oled.print("BUTTONS: VENT / LIGHT");
   else oled.print(hotDemand ? "HEAT VENT ACTIVE" : "MONITORING");
   oled.display();
 }
@@ -303,6 +342,8 @@ void setup() {
   Serial.begin(115200);
   pinMode(MANUAL_PIN, INPUT_PULLUP);
   pinMode(RESET_PIN, INPUT_PULLUP);
+  pinMode(VENT_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(LIGHT_BUTTON_PIN, INPUT_PULLUP);
   pinMode(LED_1_PIN, OUTPUT);
   pinMode(LED_2_PIN, OUTPUT);
   pinMode(LDR_PIN, INPUT);
