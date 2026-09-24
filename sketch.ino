@@ -1,9 +1,4 @@
-/**
- * @file sketch.ino
- * @brief ESP32 Scenario 2 micro-climate nursery controller.
- * @details Fault > manual > automatic. All recurring work is scheduled with
- * millis(); the DHT is polled no more often than once every two seconds.
- */
+/** ESP32 nursery controller: Auto, Manual, and Sensor Fault modes. */
 #include <Arduino.h>
 #include <Wire.h>
 #include <DHTesp.h>
@@ -11,235 +6,177 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <math.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
-constexpr uint8_t DHT_PIN = 15;
-constexpr uint8_t LDR_PIN = 34;       // ADC1, analogue input only
-constexpr uint8_t SERVO_PIN = 25;
-constexpr uint8_t LED_1_PIN = 18;
-constexpr uint8_t LED_2_PIN = 19;
-constexpr uint8_t MANUAL_PIN = 27;    // Switch shorts to ground in manual mode
-constexpr uint8_t RESET_PIN = 26;     // Normally open, shorts to ground
-constexpr uint8_t VENT_BUTTON_PIN = 32;
-constexpr uint8_t LIGHT_BUTTON_PIN = 33;
-constexpr uint32_t DHT_PERIOD = 2000;
-constexpr uint32_t LIGHT_PERIOD = 250;
-constexpr uint32_t DISPLAY_PERIOD = 250;
-constexpr uint32_t STATUS_PERIOD = 1000;
-constexpr uint32_t RECOVERY_MS = 6000;
-constexpr int VENT_MAX_DEG = 90;
-constexpr int VENT_FAULT_DEG = 45;
+// Wiring
+const byte DHT_PIN = 15, LDR_PIN = 34, SERVO_PIN = 25;
+const byte LED1_PIN = 18, LED2_PIN = 19;
+const byte MANUAL_PIN = 27, RESET_PIN = 26;
+const byte VENT_BUTTON_PIN = 32, LIGHT_BUTTON_PIN = 33;
 
-enum class Mode { AUTO, MANUAL, FAULT };
+// Timing and safety settings
+const unsigned long DHT_INTERVAL = 2000;
+const unsigned long LIGHT_INTERVAL = 250;
+const unsigned long SCREEN_INTERVAL = 250;
+const unsigned long STATUS_INTERVAL = 1000;
+const unsigned long RECOVERY_TIME = 6000;
+const unsigned long DEBOUNCE_TIME = 40;
+const int FAULT_VENT = 45;
+
+enum Mode { AUTO, MANUAL, FAULT };
+Mode mode = AUTO;
 DHTesp dht;
 Servo vent;
 Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 bool oledReady = false;
-Mode mode = Mode::AUTO;
+
+float temperatureC = NAN, humidityPct = NAN, hotThreshold = 29.0f;
+int lightRaw = -1, lightPct = -1, darkThreshold = 30;
+int ventDegrees = 0, manualVent = 0;
 bool dhtValid = false, ldrValid = false, haveDhtSample = false;
 bool injectDht = false, injectLdr = false;
-bool hotDemand = false, growLights = false;
-float temperatureC = NAN, humidityPct = NAN;
-int lightRaw = -1, lightPct = -1, ventDegrees = 0;
-float hotOnC = 29.0f;
-int darkOnPct = 30;
-uint32_t nextDht = 0, nextLight = 0, nextDisplay = 0, nextStatus = 0;
-uint32_t healthySince = 0;
+bool hotDemand = false, autoLights = false, growLights = false;
+bool manualOn = false, manualCandidate = false, manualLights = false;
 bool wasHealthy = false;
-bool manualStable = false, manualCandidate = false;
-uint32_t manualChanged = 0;
-bool resetWasPressed = false;
-int manualVentDegrees = 0;
-bool manualLights = false;
-struct ButtonState {
-  bool candidate = false;
-  bool stable = false;
-  uint32_t changed = 0;
+unsigned long manualChanged = 0, healthySince = 0;
+unsigned long lastDht = 0, lastLight = 0, lastScreen = 0, lastStatus = 0;
+
+// Each button connects its GPIO pin to ground when pressed.
+struct Button {
+  byte pin;
+  bool candidate;
+  bool stable;
+  unsigned long changed;
 };
-ButtonState ventButton, lightButton;
+Button resetButton = {RESET_PIN, false, false, 0};
+Button ventButton = {VENT_BUTTON_PIN, false, false, 0};
+Button lightButton = {LIGHT_BUTTON_PIN, false, false, 0};
+
 char command[64];
-size_t commandLength = 0;
+byte commandLength = 0;
 
-/** @brief Test whether a timer deadline has passed across millis wraparound.
- * @param now Current millis counter.
- * @param deadline Scheduled time.
- * @return True if the deadline is due. */
-bool due(uint32_t now, uint32_t deadline) {
-  return (int32_t)(now - deadline) >= 0;
-}
-
-/** @brief Constrain a floating point value to a range.
- * @param value Proposed value.
- * @param minimum Inclusive lower bound.
- * @param maximum Inclusive upper bound.
- * @return Bounded value. */
-float bound(float value, float minimum, float maximum) {
-  return fminf(maximum, fmaxf(minimum, value));
-}
-
-/** @brief Read the ADC and derive a relative light percentage.
- * @param none No arguments.
- * @return Nothing; updates lightRaw, lightPct and ldrValid. */
-void sampleLight() {
-  lightRaw = analogRead(LDR_PIN);
-  // On this module the analogue voltage rises as the room gets darker.
-  ldrValid = !injectLdr && lightRaw > 1 && lightRaw < 4094;
-  lightPct = ldrValid ? (int)lroundf((4095 - lightRaw) * 100.0f / 4095.0f) : -1;
-}
-
-/** @brief Poll DHT22 and reject missing or out-of-range readings.
- * @param none No arguments.
- * @return Nothing; updates sensor readings and validity. */
-void sampleDht() {
-  TempAndHumidity reading = dht.getTempAndHumidity();
-  haveDhtSample = true;
-  dhtValid = !injectDht && isfinite(reading.temperature) &&
-             isfinite(reading.humidity) && reading.temperature >= -40.0f &&
-             reading.temperature <= 80.0f && reading.humidity >= 0.0f &&
-             reading.humidity <= 100.0f;
-  if (dhtValid) {
-    temperatureC = reading.temperature;
-    humidityPct = reading.humidity;
-  } else {
-    temperatureC = NAN;
-    humidityPct = NAN;
+/** Return true once when a button has been held for 40 ms. */
+bool newPress(Button &button, unsigned long now) {
+  bool pressed = digitalRead(button.pin) == LOW;
+  if (pressed != button.candidate) {
+    button.candidate = pressed;
+    button.changed = now;
   }
-}
-
-/** @brief Debounce an active-low pushbutton and report a new press.
- * @param pin GPIO connected to the button.
- * @param state Persistent debounce state.
- * @param now Current milliseconds.
- * @return True once for each stable press. */
-bool buttonPressed(uint8_t pin, ButtonState &state, uint32_t now) {
-  bool candidate = digitalRead(pin) == LOW;
-  if (candidate != state.candidate) {
-    state.candidate = candidate;
-    state.changed = now;
-  }
-  if (candidate != state.stable && now - state.changed >= 40) {
-    state.stable = candidate;
-    return candidate;
+  if (pressed != button.stable && now - button.changed >= DEBOUNCE_TIME) {
+    button.stable = pressed;
+    return pressed;
   }
   return false;
 }
 
-/** @brief Filter contact bounce and read the manual controls.
- * @param now Current milliseconds.
- * @return True only on a new reset-button press. */
-bool readControls(uint32_t now) {
-  bool wasManual = manualStable;
-  bool candidate = digitalRead(MANUAL_PIN) == LOW;
-  if (candidate != manualCandidate) {
-    manualCandidate = candidate;
+/** Read the Auto/Manual slide switch without contact bounce. */
+void readManualSwitch(unsigned long now) {
+  bool reading = digitalRead(MANUAL_PIN) == LOW;
+  if (reading != manualCandidate) {
+    manualCandidate = reading;
     manualChanged = now;
   }
-  if (now - manualChanged >= 40) manualStable = manualCandidate;
-  if (manualStable && !wasManual) {
-    manualVentDegrees = 0;
-    manualLights = false;
+  if (manualOn != manualCandidate && now - manualChanged >= DEBOUNCE_TIME) {
+    manualOn = manualCandidate;
+    if (manualOn) {
+      manualVent = 0;
+      manualLights = false;
+    }
   }
-  bool ventEdge = buttonPressed(VENT_BUTTON_PIN, ventButton, now);
-  bool lightEdge = buttonPressed(LIGHT_BUTTON_PIN, lightButton, now);
-  if (manualStable && mode != Mode::FAULT) {
-    if (ventEdge) manualVentDegrees = (manualVentDegrees + 45) % 135;
-    if (lightEdge) manualLights = !manualLights;
-  }
-  bool pressed = digitalRead(RESET_PIN) == LOW;
-  bool edge = pressed && !resetWasPressed;
-  resetWasPressed = pressed;
-  return edge;
 }
 
-/** @brief Determine fault recovery and select the highest-priority mode.
- * @param now Current milliseconds.
- * @param resetEdge True when the worker pressed reset.
- * @return Nothing; updates the latched operating mode. */
-void selectMode(uint32_t now, bool resetEdge) {
-  if (!haveDhtSample) return; // DHT has a two-second minimum sampling interval.
-  bool healthy = dhtValid && ldrValid;
-  if (!healthy) {
+/** Read the light sensor and convert its ADC value to a relative percentage. */
+void readLight() {
+  lightRaw = analogRead(LDR_PIN);
+  ldrValid = !injectLdr && lightRaw > 1 && lightRaw < 4094;
+  // This module's voltage rises as the room gets darker.
+  lightPct = ldrValid ? (int)round((4095 - lightRaw) * 100.0f / 4095.0f) : -1;
+}
+
+/** Read the DHT22 and reject missing or out-of-range measurements. */
+void readDht() {
+  TempAndHumidity reading = dht.getTempAndHumidity();
+  haveDhtSample = true;
+  dhtValid = !injectDht && isfinite(reading.temperature) &&
+             isfinite(reading.humidity) && reading.temperature >= -40 &&
+             reading.temperature <= 80 && reading.humidity >= 0 &&
+             reading.humidity <= 100;
+  temperatureC = dhtValid ? reading.temperature : NAN;
+  humidityPct = dhtValid ? reading.humidity : NAN;
+}
+
+/** Choose Fault first, then Manual, then Auto. Fault requires a delayed reset. */
+void chooseMode(unsigned long now, bool resetPressed) {
+  if (!haveDhtSample) return;
+  if (!dhtValid || !ldrValid) {
+    mode = FAULT;
     wasHealthy = false;
-    mode = Mode::FAULT;
     return;
   }
   if (!wasHealthy) {
     healthySince = now;
     wasHealthy = true;
   }
-  if (mode == Mode::FAULT && !(resetEdge && now - healthySince >= RECOVERY_MS)) return;
-  mode = manualStable ? Mode::MANUAL : Mode::AUTO;
+  if (mode == FAULT && (!resetPressed || now - healthySince < RECOVERY_TIME)) return;
+  mode = manualOn ? MANUAL : AUTO;
 }
 
-/** @brief Compute outputs from the selected mode and sensor readings.
- * @param none No arguments.
- * @return Nothing; sets ventDegrees and growLights. */
-void calculateOutputs() {
-  if (mode == Mode::FAULT) {
-    ventDegrees = VENT_FAULT_DEG;
-    growLights = true;
-    return;
+/** Calculate the vent angle and LED state for the active mode. */
+void chooseOutputs() {
+  // Remember Auto's light decision separately from the Manual button setting.
+  if (ldrValid) {
+    if (lightPct <= darkThreshold) autoLights = true;
+    else if (lightPct >= darkThreshold + 6) autoLights = false;
   }
-  if (mode == Mode::MANUAL) {
-    ventDegrees = manualVentDegrees;
+  if (dhtValid) {
+    if (temperatureC <= 17 || temperatureC <= hotThreshold - 2) hotDemand = false;
+    else if (temperatureC >= hotThreshold) hotDemand = true;
+  }
+
+  if (mode == FAULT || !haveDhtSample) {
+    ventDegrees = FAULT_VENT;
+    growLights = true;
+  } else if (mode == MANUAL) {
+    ventDegrees = manualVent;
     growLights = manualLights;
-    return;
+  } else {
+    // At 38 C or above the vent is fully open.
+    float fraction = (temperatureC - (hotThreshold - 2)) /
+                     (38.0f - (hotThreshold - 2));
+    ventDegrees = hotDemand ? constrain((int)round(90 * fraction), 0, 90) : 0;
+    growLights = autoLights;
   }
-  if (!haveDhtSample || !ldrValid) {
-    ventDegrees = VENT_FAULT_DEG;
-    growLights = true;
-    return;
-  }
-  // Cold protection overrides heat vent demand. Hysteresis avoids chatter.
-  if (temperatureC <= 17.0f) hotDemand = false;
-  else if (temperatureC >= hotOnC) hotDemand = true;
-  else if (temperatureC <= hotOnC - 2.0f) hotDemand = false;
-  ventDegrees = hotDemand
-      ? (int)lroundf(VENT_MAX_DEG * bound((temperatureC - (hotOnC - 2.0f)) /
-                                      (38.0f - (hotOnC - 2.0f)), 0.0f, 1.0f))
-      : 0;
-  if (lightPct <= darkOnPct) growLights = true;
-  else if (lightPct >= darkOnPct + 6) growLights = false;
 }
 
-/** @brief Apply GPIO and PWM outputs only when values change.
- * @param none No arguments.
- * @return Nothing; writes two LEDs and the servo. */
+/** Send output changes to the servo and both LEDs. */
 void applyOutputs() {
-  static int lastVent = -1;
-  static int lastLights = -1;
-  if (ventDegrees != lastVent) {
+  static int previousVent = -1, previousLights = -1;
+  if (ventDegrees != previousVent) {
     vent.write(ventDegrees);
-    lastVent = ventDegrees;
+    previousVent = ventDegrees;
   }
-  if ((int)growLights != lastLights) {
-    digitalWrite(LED_1_PIN, growLights ? HIGH : LOW);
-    digitalWrite(LED_2_PIN, growLights ? HIGH : LOW);
-    lastLights = growLights;
+  if ((int)growLights != previousLights) {
+    digitalWrite(LED1_PIN, growLights ? HIGH : LOW);
+    digitalWrite(LED2_PIN, growLights ? HIGH : LOW);
+    previousLights = growLights;
   }
 }
 
-/** @brief Name the active operating mode.
- * @param none No arguments.
- * @return Constant mode name. */
+/** Return a short name for the current operating mode. */
 const char *modeName() {
-  switch (mode) {
-    case Mode::AUTO: return "AUTO";
-    case Mode::MANUAL: return "MANUAL OVERRIDE";
-    default: return "SENSOR FAULT";
-  }
+  if (mode == FAULT) return "SENSOR FAULT";
+  if (mode == MANUAL) return "MANUAL OVERRIDE";
+  return "AUTO";
 }
 
-/** @brief Refresh all live readings and the relevant operator alert.
- * @param none No arguments.
- * @return Nothing; writes the I2C screen if present. */
-void renderDisplay() {
+/** Show readings, outputs, and any fault on the OLED. */
+void showScreen() {
   if (!oledReady) return;
   oled.clearDisplay();
   oled.setTextSize(1);
   oled.setTextColor(SSD1306_WHITE);
-  oled.setCursor(0, 0); oled.print(modeName());
+  oled.setCursor(0, 0);  oled.print(modeName());
   oled.setCursor(0, 11); oled.print("Temp: ");
   if (dhtValid) oled.print(temperatureC, 1); else oled.print("N/A");
   oled.print(" C");
@@ -250,21 +187,19 @@ void renderDisplay() {
   if (ldrValid) oled.print(lightPct); else oled.print("N/A");
   oled.print(" %");
   oled.setCursor(0, 41); oled.print("Vent: "); oled.print(ventDegrees);
-  oled.print(" deg  LED:"); oled.print(growLights ? "ON" : "OFF");
+  oled.print(" deg LED:"); oled.print(growLights ? "ON" : "OFF");
   oled.setCursor(0, 53);
-  if (mode == Mode::FAULT) {
+  if (mode == FAULT) {
     oled.print("CHECK ");
     if (!dhtValid) oled.print("DHT22 ");
     if (!ldrValid) oled.print("LDR ");
     oled.print("RESET");
-  } else if (mode == Mode::MANUAL) oled.print("BUTTONS: VENT / LIGHT");
+  } else if (mode == MANUAL) oled.print("VENT/LIGHT BUTTONS");
   else oled.print(hotDemand ? "HEAT VENT ACTIVE" : "MONITORING");
   oled.display();
 }
 
-/** @brief Print one live status record over USB UART.
- * @param none No arguments.
- * @return Nothing; emits current measurements and outputs. */
+/** Print a single status line to the serial monitor. */
 void printStatus() {
   Serial.printf("mode=%s temp=%.1fC humidity=%.1f%% light=%d%% raw=%d "
                 "vent=%ddeg leds=%s dht=%s ldr=%s\n", modeName(),
@@ -273,37 +208,33 @@ void printStatus() {
                 ldrValid ? "ok" : "fault");
 }
 
-/** @brief Parse an entered numeric configuration value safely.
- * @param input Characters after a set command.
- * @param minimum Lowest accepted value.
- * @param maximum Highest accepted value.
- * @param result Receives the parsed number.
- * @return True only for one finite value within the limits. */
-bool parseNumber(const char *input, float minimum, float maximum, float &result) {
-  char *end = nullptr;
-  float value = strtof(input, &end);
-  while (*end == ' ') ++end;
-  if (end == input || *end != '\0' || !isfinite(value) || value < minimum || value > maximum) return false;
-  result = value;
-  return true;
+/** Parse a number and check its allowed range. */
+bool readNumber(const char *text, float minimum, float maximum, float &value) {
+  char *end;
+  value = strtof(text, &end);
+  while (*end == ' ') end++;
+  return end != text && *end == '\0' && isfinite(value) &&
+         value >= minimum && value <= maximum;
 }
 
-/** @brief Execute one newline-terminated UART command.
- * @param line Writable NUL-terminated command buffer.
- * @return Nothing; prints an acknowledgement or error. */
-void executeCommand(char *line) {
+/** Run one complete command from the serial monitor. */
+void runCommand(char *line) {
   if (strcmp(line, "help") == 0) {
     Serial.println("status | set hot 25..34 | set dark 5..80 | fault dht on/off | fault ldr on/off | reset");
   } else if (strcmp(line, "status") == 0) {
     printStatus();
   } else if (strncmp(line, "set hot ", 8) == 0) {
     float value;
-    if (parseNumber(line + 8, 25, 34, value)) { hotOnC = value; Serial.println("OK hot threshold"); }
-    else Serial.println("ERR hot must be 25..34 C");
+    if (readNumber(line + 8, 25, 34, value)) {
+      hotThreshold = value;
+      Serial.println("OK hot threshold");
+    } else Serial.println("ERR hot must be 25..34 C");
   } else if (strncmp(line, "set dark ", 9) == 0) {
     float value;
-    if (parseNumber(line + 9, 5, 80, value)) { darkOnPct = (int)lroundf(value); Serial.println("OK dark threshold"); }
-    else Serial.println("ERR dark must be 5..80 percent");
+    if (readNumber(line + 9, 5, 80, value)) {
+      darkThreshold = (int)round(value);
+      Serial.println("OK dark threshold");
+    } else Serial.println("ERR dark must be 5..80 percent");
   } else if (strcmp(line, "fault dht on") == 0 || strcmp(line, "fault dht off") == 0) {
     injectDht = strcmp(line, "fault dht on") == 0;
     if (injectDht) dhtValid = false;
@@ -313,40 +244,38 @@ void executeCommand(char *line) {
     if (injectLdr) ldrValid = false;
     Serial.println("OK LDR fault injection; use reset button after recovery");
   } else if (strcmp(line, "reset") == 0) {
-    // UART reset is useful for a remote operator with console access.
-    selectMode(millis(), true);
-    Serial.println(mode == Mode::FAULT ? "WAIT for healthy sensors 6s then reset" : "OK reset");
+    chooseMode(millis(), true);
+    Serial.println(mode == FAULT ? "WAIT for healthy sensors 6s then reset" : "OK reset");
   } else Serial.println("ERR unknown command; type help");
 }
 
-/** @brief Accumulate UART input without blocking or heap allocations.
- * @param none No arguments.
- * @return Nothing; handles complete newline-terminated commands. */
-void pollSerial() {
+/** Collect serial bytes until a newline completes a command. */
+void readSerial() {
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\r') continue;
     if (c == '\n') {
       command[commandLength] = '\0';
-      if (commandLength) executeCommand(command);
+      if (commandLength) runCommand(command);
       commandLength = 0;
-    } else if (commandLength < sizeof(command) - 1) command[commandLength++] = c;
-    else { commandLength = 0; Serial.println("ERR command too long"); }
+    } else if (commandLength < sizeof(command) - 1) {
+      command[commandLength++] = c;
+    } else {
+      commandLength = 0;
+      Serial.println("ERR command too long");
+    }
   }
 }
 
-/** @brief Initialise GPIO, UART, ADC, PWM, I2C, display and sensors.
- * @param none No arguments.
- * @return Nothing; Arduino entry point. */
+/** Set up the hardware and start the timers. */
 void setup() {
   Serial.begin(115200);
   pinMode(MANUAL_PIN, INPUT_PULLUP);
   pinMode(RESET_PIN, INPUT_PULLUP);
   pinMode(VENT_BUTTON_PIN, INPUT_PULLUP);
   pinMode(LIGHT_BUTTON_PIN, INPUT_PULLUP);
-  pinMode(LED_1_PIN, OUTPUT);
-  pinMode(LED_2_PIN, OUTPUT);
-  pinMode(LDR_PIN, INPUT);
+  pinMode(LED1_PIN, OUTPUT);
+  pinMode(LED2_PIN, OUTPUT);
   analogReadResolution(12);
   analogSetPinAttenuation(LDR_PIN, ADC_11db);
   Wire.begin(21, 22);
@@ -354,31 +283,45 @@ void setup() {
   dht.setup(DHT_PIN, DHTesp::DHT22);
   vent.setPeriodHertz(50);
   vent.attach(SERVO_PIN, 500, 2400);
-  sampleLight();
-  calculateOutputs();
+  readLight();
+  chooseOutputs();
   applyOutputs();
-  renderDisplay();
+  showScreen();
   Serial.println("NURSERY READY; type help. Waiting for first DHT reading.");
   if (!oledReady) Serial.println("WARNING OLED missing at I2C address 0x3C");
-  uint32_t now = millis();
-  nextDht = now + DHT_PERIOD;
-  nextLight = now + LIGHT_PERIOD;
-  nextDisplay = now + DISPLAY_PERIOD;
-  nextStatus = now + STATUS_PERIOD;
+  lastDht = lastLight = lastScreen = lastStatus = millis();
 }
 
-/** @brief Service inputs, fault state, outputs and scheduled work.
- * @param none No arguments.
- * @return Nothing; Arduino entry point, intentionally no delay(). */
+/** Read inputs, update the mode, and run each scheduled task. */
 void loop() {
-  uint32_t now = millis();
-  pollSerial();
-  bool resetEdge = readControls(now);
-  if (due(now, nextLight)) { nextLight = now + LIGHT_PERIOD; sampleLight(); }
-  if (due(now, nextDht)) { nextDht = now + DHT_PERIOD; sampleDht(); }
-  selectMode(now, resetEdge);
-  calculateOutputs();
+  unsigned long now = millis();
+  readSerial();
+  readManualSwitch(now);
+  bool resetPressed = newPress(resetButton, now);
+  bool ventPressed = newPress(ventButton, now);
+  bool lightPressed = newPress(lightButton, now);
+
+  if (now - lastLight >= LIGHT_INTERVAL) {
+    lastLight = now;
+    readLight();
+  }
+  if (now - lastDht >= DHT_INTERVAL) {
+    lastDht = now;
+    readDht();
+  }
+  chooseMode(now, resetPressed);
+  if (mode == MANUAL) {
+    if (ventPressed) manualVent = (manualVent + 45) % 135;
+    if (lightPressed) manualLights = !manualLights;
+  }
+  chooseOutputs();
   applyOutputs();
-  if (due(now, nextDisplay)) { nextDisplay = now + DISPLAY_PERIOD; renderDisplay(); }
-  if (due(now, nextStatus)) { nextStatus = now + STATUS_PERIOD; printStatus(); }
+  if (now - lastScreen >= SCREEN_INTERVAL) {
+    lastScreen = now;
+    showScreen();
+  }
+  if (now - lastStatus >= STATUS_INTERVAL) {
+    lastStatus = now;
+    printStatus();
+  }
 }
