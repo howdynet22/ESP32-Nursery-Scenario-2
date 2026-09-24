@@ -9,6 +9,18 @@ COMP50069 Hardware, Microcontrollers and Sensors. This is a teaching prototype f
 | `sketch.ino` | ESP32 Arduino firmware, with Doxygen comments on every function |
 | `diagram.json` | Wokwi circuit and connections |
 | `libraries.txt` | Libraries needed by Wokwi and Arduino IDE |
+| `platformio.ini` | ESP32 board and library settings for PlatformIO in VS Code |
+| `wokwi.toml` | Points Wokwi for VS Code at the PlatformIO firmware |
+| `src/main.cpp` | Builds the existing `sketch.ino` without a second copy of the firmware |
+
+## Open in VS Code with PlatformIO and Wokwi
+
+1. Clone this repository and open its root folder in VS Code. Install the recommended **PlatformIO IDE** and **Wokwi Simulator** extensions if prompted.
+2. In PlatformIO, select **Build** (the check mark). The first build downloads the ESP32 toolchain and the libraries listed in `platformio.ini`.
+3. In VS Code's Command Palette, run **Wokwi: Request a new License** and complete activation if Wokwi asks. Then run **Wokwi: Start Simulator**. Build again after editing `sketch.ino` so Wokwi runs the latest firmware.
+4. The simulator uses this repository's `diagram.json` and the firmware at `.pio/build/esp32dev/firmware.bin`. The serial monitor uses **115200 baud**. For a physical board, connect it over USB and use PlatformIO **Upload**, then **Monitor**.
+
+Keep edits to the firmware in `sketch.ino`. `src/main.cpp` includes that file for PlatformIO, while the Wokwi website continues to read it directly. Generated `.pio` files and any local Wokwi license stay out of Git.
 
 The submitted report contains the full source in its appendix and must include this repository's URL and a saved Wokwi project URL. A `diagram.json` file alone is **not** a Wokwi share link.
 
