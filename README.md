@@ -11,6 +11,7 @@ COMP50069 Hardware, Microcontrollers and Sensors. This is a teaching prototype f
 | `libraries.txt` | Libraries needed by Wokwi and Arduino IDE |
 | `platformio.ini` | ESP32 board and library settings for PlatformIO in VS Code |
 | `wokwi.toml` | Points Wokwi for VS Code at the PlatformIO firmware |
+| `send_command.py` | Sends a command to the simulated ESP32 from a normal terminal |
 | `src/main.cpp` | Builds the existing `sketch.ino` without a second copy of the firmware |
 
 ## Open in VS Code with PlatformIO and Wokwi
@@ -63,7 +64,7 @@ Check the labels on your particular ESP32 board before wiring. Power down before
 
 ## Serial commands
 
-In VS Code, start Wokwi and use the **Wokwi Terminal** in the bottom panel. Select that terminal, type a command, and press Enter. Typed characters may not be visible until the ESP32 responds. The diagram connects ESP32 UART0 to Wokwi's virtual serial monitor; no physical components or USB cable are needed.
+The **Wokwi Terminal** in VS Code shows the continuous status output. To send a command, stop and restart the simulator after pulling changes so `wokwi.toml` opens serial port 4000. Then open a separate **PowerShell** terminal in the repository folder and run `python send_command.py fault dht on`. Install PySerial with `python -m pip install pyserial` if Python reports that `serial` is missing. No physical ESP32 or USB cable is needed. Keep the simulator tab visible while sending commands.
 
 | Command | Effect |
 | --- | --- |
