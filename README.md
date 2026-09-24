@@ -61,6 +61,8 @@ Check the labels on your particular ESP32 board before wiring. Power down before
 
 ## Serial commands
 
+In VS Code, start Wokwi and use the **Wokwi Terminal** in the bottom panel. Select that terminal, type a command, and press Enter. Typed characters may not be visible until the ESP32 responds. The diagram connects ESP32 UART0 to Wokwi's virtual serial monitor; no physical components or USB cable are needed.
+
 | Command | Effect |
 | --- | --- |
 | `help` | List commands |
