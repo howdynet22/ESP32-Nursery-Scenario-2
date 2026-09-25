@@ -1,4 +1,7 @@
-/** ESP32 nursery controller: Auto, Manual, and Sensor Fault modes. */
+/**
+ * @file sketch.ino
+ * @brief ESP32 nursery controller with Auto, Manual, and Sensor Fault modes.
+ */
 #include <Arduino.h>
 #include <Wire.h>
 #include <DHTesp.h>
@@ -39,6 +42,7 @@ bool injectDht = false, injectLdr = false;
 bool hotDemand = false, autoLights = false, growLights = false;
 bool manualOn = false, manualCandidate = false, manualLights = false;
 bool wasHealthy = false;
+volatile bool resetInterrupt = false;
 unsigned long manualChanged = 0, healthySince = 0;
 unsigned long lastDht = 0, lastLight = 0, lastScreen = 0, lastStatus = 0;
 
@@ -56,7 +60,21 @@ Button lightButton = {LIGHT_BUTTON_PIN, false, false, 0};
 char command[64];
 byte commandLength = 0;
 
-/** Return true once when a button has been held for 40 ms. */
+/**
+ * @brief Record that the reset button produced a falling edge.
+ * @param none No arguments.
+ * @return Nothing; the main loop checks the flag after debouncing.
+ */
+void IRAM_ATTR onResetPress() {
+  resetInterrupt = true;
+}
+
+/**
+ * @brief Return true once when a button has been held for 40 ms.
+ * @param button Button and its remembered state.
+ * @param now Current elapsed time in milliseconds.
+ * @return True once for each stable press.
+ */
 bool newPress(Button &button, unsigned long now) {
   bool pressed = digitalRead(button.pin) == LOW;
   if (pressed != button.candidate) {
@@ -70,7 +88,11 @@ bool newPress(Button &button, unsigned long now) {
   return false;
 }
 
-/** Read the Auto/Manual slide switch without contact bounce. */
+/**
+ * @brief Read the Auto/Manual slide switch without contact bounce.
+ * @param now Current elapsed time in milliseconds.
+ * @return Nothing; updates the Manual switch state.
+ */
 void readManualSwitch(unsigned long now) {
   bool reading = digitalRead(MANUAL_PIN) == LOW;
   if (reading != manualCandidate) {
@@ -86,7 +108,11 @@ void readManualSwitch(unsigned long now) {
   }
 }
 
-/** Read the light sensor and convert its ADC value to a relative percentage. */
+/**
+ * @brief Read the light sensor and calculate a relative brightness percentage.
+ * @param none No arguments.
+ * @return Nothing; updates the light reading and its validity.
+ */
 void readLight() {
   lightRaw = analogRead(LDR_PIN);
   ldrValid = !injectLdr && lightRaw > 1 && lightRaw < 4094;
@@ -94,7 +120,11 @@ void readLight() {
   lightPct = ldrValid ? (int)round((4095 - lightRaw) * 100.0f / 4095.0f) : -1;
 }
 
-/** Read the DHT22 and reject missing or out-of-range measurements. */
+/**
+ * @brief Read the DHT22 and reject missing or out-of-range measurements.
+ * @param none No arguments.
+ * @return Nothing; updates temperature, humidity, and validity.
+ */
 void readDht() {
   TempAndHumidity reading = dht.getTempAndHumidity();
   haveDhtSample = true;
@@ -106,7 +136,12 @@ void readDht() {
   humidityPct = dhtValid ? reading.humidity : NAN;
 }
 
-/** Choose Fault first, then Manual, then Auto. Fault requires a delayed reset. */
+/**
+ * @brief Choose Fault first, then Manual, then Auto.
+ * @param now Current elapsed time in milliseconds.
+ * @param resetPressed True for a new debounced reset press.
+ * @return Nothing; updates the operating mode.
+ */
 void chooseMode(unsigned long now, bool resetPressed) {
   if (!haveDhtSample) return;
   if (!dhtValid || !ldrValid) {
@@ -122,7 +157,11 @@ void chooseMode(unsigned long now, bool resetPressed) {
   mode = manualOn ? MANUAL : AUTO;
 }
 
-/** Calculate the vent angle and LED state for the active mode. */
+/**
+ * @brief Calculate the vent angle and LED state for the active mode.
+ * @param none No arguments.
+ * @return Nothing; updates output targets.
+ */
 void chooseOutputs() {
   // Remember Auto's light decision separately from the Manual button setting.
   if (ldrValid) {
@@ -149,7 +188,11 @@ void chooseOutputs() {
   }
 }
 
-/** Send output changes to the servo and both LEDs. */
+/**
+ * @brief Send output changes to the servo and both LEDs.
+ * @param none No arguments.
+ * @return Nothing; updates hardware outputs only when needed.
+ */
 void applyOutputs() {
   static int previousVent = -1, previousLights = -1;
   if (ventDegrees != previousVent) {
@@ -163,14 +206,22 @@ void applyOutputs() {
   }
 }
 
-/** Return a short name for the current operating mode. */
+/**
+ * @brief Return a short name for the current operating mode.
+ * @param none No arguments.
+ * @return The name of Auto, Manual Override, or Sensor Fault.
+ */
 const char *modeName() {
   if (mode == FAULT) return "SENSOR FAULT";
   if (mode == MANUAL) return "MANUAL OVERRIDE";
   return "AUTO";
 }
 
-/** Show readings, outputs, and any fault on the OLED. */
+/**
+ * @brief Show readings, outputs, and any fault on the OLED.
+ * @param none No arguments.
+ * @return Nothing; updates the display if it is available.
+ */
 void showScreen() {
   if (!oledReady) return;
   oled.clearDisplay();
@@ -199,7 +250,11 @@ void showScreen() {
   oled.display();
 }
 
-/** Print a single status line to the serial monitor. */
+/**
+ * @brief Print a single status line to the serial monitor.
+ * @param none No arguments.
+ * @return Nothing; writes one UART line.
+ */
 void printStatus() {
   Serial.printf("mode=%s temp=%.1fC humidity=%.1f%% light=%d%% raw=%d "
                 "vent=%ddeg leds=%s dht=%s ldr=%s\n", modeName(),
@@ -208,7 +263,14 @@ void printStatus() {
                 ldrValid ? "ok" : "fault");
 }
 
-/** Parse a number and check its allowed range. */
+/**
+ * @brief Parse a number and check its allowed range.
+ * @param text Characters to parse.
+ * @param minimum Lowest accepted value.
+ * @param maximum Highest accepted value.
+ * @param value Receives the parsed number.
+ * @return True when the entire input is one finite in-range number.
+ */
 bool readNumber(const char *text, float minimum, float maximum, float &value) {
   char *end;
   value = strtof(text, &end);
@@ -217,7 +279,11 @@ bool readNumber(const char *text, float minimum, float maximum, float &value) {
          value >= minimum && value <= maximum;
 }
 
-/** Run one complete command from the serial monitor. */
+/**
+ * @brief Run one complete command from the serial monitor.
+ * @param line Writable command text ending in a null character.
+ * @return Nothing; prints a response over UART.
+ */
 void runCommand(char *line) {
   if (strcmp(line, "help") == 0) {
     Serial.println("status | set hot 25..34 | set dark 5..80 | fault dht on/off | fault ldr on/off | reset");
@@ -249,7 +315,11 @@ void runCommand(char *line) {
   } else Serial.println("ERR unknown command; type help");
 }
 
-/** Collect serial bytes until a newline completes a command. */
+/**
+ * @brief Collect serial bytes until a newline completes a command.
+ * @param none No arguments.
+ * @return Nothing; may execute one or more complete commands.
+ */
 void readSerial() {
   while (Serial.available()) {
     char c = (char)Serial.read();
@@ -267,13 +337,18 @@ void readSerial() {
   }
 }
 
-/** Set up the hardware and start the timers. */
+/**
+ * @brief Set up the hardware and start the timers.
+ * @param none No arguments.
+ * @return Nothing; Arduino entry point.
+ */
 void setup() {
   Serial.begin(115200);
   pinMode(MANUAL_PIN, INPUT_PULLUP);
   pinMode(RESET_PIN, INPUT_PULLUP);
   pinMode(VENT_BUTTON_PIN, INPUT_PULLUP);
   pinMode(LIGHT_BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(RESET_PIN), onResetPress, FALLING);
   pinMode(LED1_PIN, OUTPUT);
   pinMode(LED2_PIN, OUTPUT);
   analogReadResolution(12);
@@ -292,12 +367,17 @@ void setup() {
   lastDht = lastLight = lastScreen = lastStatus = millis();
 }
 
-/** Read inputs, update the mode, and run each scheduled task. */
+/**
+ * @brief Read inputs, update the mode, and run each scheduled task.
+ * @param none No arguments.
+ * @return Nothing; Arduino entry point.
+ */
 void loop() {
   unsigned long now = millis();
   readSerial();
   readManualSwitch(now);
-  bool resetPressed = newPress(resetButton, now);
+  bool resetPressed = newPress(resetButton, now) && resetInterrupt;
+  if (resetPressed) resetInterrupt = false;
   bool ventPressed = newPress(ventButton, now);
   bool lightPressed = newPress(lightButton, now);
 
