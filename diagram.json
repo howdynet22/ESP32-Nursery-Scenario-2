@@ -8,104 +8,76 @@
       "id": "esp",
       "top": 40.9,
       "left": 272.4,
-      "attrs": {},
-      "rotate": 180
+      "rotate": 180,
+      "attrs": {}
     },
     {
       "type": "wokwi-dht22",
       "id": "dht",
       "top": -75,
       "left": -110,
-      "attrs": {
-        "temperature": "24",
-        "humidity": "55"
-      }
+      "attrs": { "temperature": "24", "humidity": "55" }
     },
     {
       "type": "wokwi-photoresistor-sensor",
       "id": "ldr",
       "top": -77.1,
       "left": -72.7,
-      "attrs": {
-        "lux": "500"
-      },
-      "rotate": 90
+      "rotate": 90,
+      "attrs": { "lux": "500" }
     },
     {
       "type": "board-ssd1306",
       "id": "oled",
       "top": 473.54,
       "left": 192.23,
-      "attrs": {
-        "i2cAddress": "0x3c"
-      }
+      "attrs": { "i2cAddress": "0x3c" }
     },
-    {
-      "type": "wokwi-servo",
-      "id": "vent",
-      "top": 65.2,
-      "left": 412.8,
-      "attrs": {}
-    },
+    { "type": "wokwi-servo", "id": "vent", "top": 65.2, "left": 412.8, "attrs": {} },
     {
       "type": "wokwi-slide-switch",
       "id": "manual",
       "top": 385.8,
       "left": -22.9,
-      "attrs": {},
-      "rotate": 270
+      "rotate": 180,
+      "attrs": {}
     },
     {
       "type": "wokwi-pushbutton",
       "id": "reset",
       "top": 380.6,
-      "left": 48,
-      "attrs": {
-        "color": "red",
-        "label": "FAULT RESET"
-      }
+      "left": 96,
+      "attrs": { "color": "red", "label": "FAULT RESET" }
     },
     {
       "type": "wokwi-pushbutton",
       "id": "ventButton",
       "top": 450,
       "left": -50,
-      "attrs": {
-        "color": "blue",
-        "label": "VENT: 0/45/90"
-      }
+      "attrs": { "color": "blue", "label": "VENT: 0/45/90" }
     },
     {
       "type": "wokwi-pushbutton",
       "id": "lightButton",
       "top": 450,
       "left": 75,
-      "attrs": {
-        "color": "yellow",
-        "label": "LIGHTS: ON/OFF"
-      }
+      "attrs": { "color": "yellow", "label": "LIGHTS: ON/OFF" }
     },
     {
       "type": "wokwi-led",
       "id": "grow1",
       "top": 301,
       "left": 548.8,
-      "attrs": {
-        "color": "yellow",
-        "label": "GROW 1"
-      },
-      "rotate": 90
+      "rotate": 90,
+      "attrs": { "color": "yellow", "label": "GROW 1" }
     },
     {
       "type": "wokwi-led",
       "id": "grow2",
       "top": 358.6,
       "left": 510.4,
-      "attrs": {
-        "color": "yellow",
-        "label": "GROW 2"
-      },
-      "rotate": 90
+      "rotate": 90,
+      "attrs": { "color": "yellow", "label": "GROW 2" }
     },
     {
       "type": "wokwi-resistor",
@@ -113,9 +85,7 @@
       "top": 312,
       "left": 431.45,
       "rotate": 90,
-      "attrs": {
-        "value": "220"
-      }
+      "attrs": { "value": "220" }
     },
     {
       "type": "wokwi-resistor",
@@ -123,171 +93,39 @@
       "top": 398,
       "left": 444,
       "rotate": 90,
-      "attrs": {
-        "value": "220"
-      }
+      "attrs": { "value": "220" }
     }
   ],
   "connections": [
-    ["esp:TX0", "$serialMonitor:RX", "", []],
-    ["esp:RX0", "$serialMonitor:TX", "", []],
-    [
-      "esp:3V3",
-      "dht:VCC",
-      "red",
-      []
-    ],
-    [
-      "esp:GND.1",
-      "dht:GND",
-      "black",
-      []
-    ],
-    [
-      "esp:D15",
-      "dht:SDA",
-      "green",
-      []
-    ],
-    [
-      "esp:3V3",
-      "ldr:VCC",
-      "red",
-      []
-    ],
-    [
-      "esp:GND.1",
-      "ldr:GND",
-      "black",
-      []
-    ],
-    [
-      "esp:D34",
-      "ldr:AO",
-      "green",
-      []
-    ],
-    [
-      "esp:3V3",
-      "oled:VCC",
-      "red",
-      []
-    ],
-    [
-      "esp:GND.1",
-      "oled:GND",
-      "black",
-      [
-        "h-66.9",
-        "v384.1"
-      ]
-    ],
-    [
-      "esp:D21",
-      "oled:SDA",
-      "blue",
-      []
-    ],
-    [
-      "esp:D22",
-      "oled:SCL",
-      "yellow",
-      []
-    ],
-    [
-      "esp:VIN",
-      "vent:V+",
-      "red",
-      []
-    ],
-    [
-      "esp:GND.1",
-      "vent:GND",
-      "black",
-      []
-    ],
-    [
-      "esp:D25",
-      "vent:PWM",
-      "green",
-      []
-    ],
-    [
-      "esp:D27",
-      "manual:2",
-      "blue",
-      []
-    ],
-    [
-      "esp:GND.1",
-      "manual:3",
-      "black",
-      []
-    ],
-    [
-      "esp:D26",
-      "reset:1.l",
-      "blue",
-      []
-    ],
-    [
-      "esp:GND.1",
-      "reset:2.l",
-      "black",
-      [
-        "v0.1",
-        "h-191.7",
-        "v153.6"
-      ]
-    ],
-    ["esp:D32", "ventButton:1.l", "blue", []],
-    ["esp:GND.1", "ventButton:2.l", "black", []],
-    ["esp:D33", "lightButton:1.l", "blue", []],
-    ["esp:GND.1", "lightButton:2.l", "black", []],
-    [
-      "esp:D18",
-      "r1:1",
-      "green",
-      []
-    ],
-    [
-      "r1:2",
-      "grow1:A",
-      "green",
-      []
-    ],
-    [
-      "grow1:C",
-      "esp:GND.1",
-      "black",
-      [
-        "v-47.6",
-        "h-297.6",
-        "v-182.5"
-      ]
-    ],
-    [
-      "esp:D19",
-      "r2:1",
-      "green",
-      []
-    ],
-    [
-      "r2:2",
-      "grow2:A",
-      "green",
-      []
-    ],
-    [
-      "grow2:C",
-      "esp:GND.1",
-      "black",
-      [
-        "v-28.4",
-        "h-268.8",
-        "v-259.3"
-      ]
-    ]
+    [ "esp:TX0", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX0", "$serialMonitor:TX", "", [] ],
+    [ "esp:3V3", "dht:VCC", "red", [] ],
+    [ "esp:GND.1", "dht:GND", "black", [] ],
+    [ "esp:D15", "dht:SDA", "green", [] ],
+    [ "esp:3V3", "ldr:VCC", "red", [] ],
+    [ "esp:GND.1", "ldr:GND", "black", [] ],
+    [ "esp:D34", "ldr:AO", "green", [] ],
+    [ "esp:3V3", "oled:VCC", "red", [] ],
+    [ "esp:GND.1", "oled:GND", "black", [ "h-66.9", "v384.1" ] ],
+    [ "esp:D21", "oled:SDA", "blue", [] ],
+    [ "esp:D22", "oled:SCL", "yellow", [] ],
+    [ "esp:VIN", "vent:V+", "red", [] ],
+    [ "esp:GND.1", "vent:GND", "black", [] ],
+    [ "esp:D25", "vent:PWM", "green", [] ],
+    [ "esp:D27", "manual:2", "blue", [] ],
+    [ "esp:GND.1", "manual:3", "black", [] ],
+    [ "esp:D26", "reset:1.l", "blue", [] ],
+    [ "esp:GND.1", "reset:2.l", "black", [ "v0.1", "h-191.7", "v153.6" ] ],
+    [ "esp:D32", "ventButton:1.l", "blue", [] ],
+    [ "esp:GND.1", "ventButton:2.l", "black", [] ],
+    [ "esp:D33", "lightButton:1.l", "blue", [] ],
+    [ "esp:GND.1", "lightButton:2.l", "black", [] ],
+    [ "esp:D18", "r1:1", "green", [] ],
+    [ "r1:2", "grow1:A", "green", [] ],
+    [ "grow1:C", "esp:GND.1", "black", [ "v-47.6", "h-297.6", "v-182.5" ] ],
+    [ "esp:D19", "r2:1", "green", [] ],
+    [ "r2:2", "grow2:A", "green", [] ],
+    [ "grow2:C", "esp:GND.1", "black", [ "v-28.4", "h-268.8", "v-259.3" ] ]
   ],
   "dependencies": {}
 }
